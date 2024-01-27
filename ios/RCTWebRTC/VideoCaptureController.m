@@ -3,6 +3,7 @@
 #import "VideoCaptureController.h"
 
 #import <React/RCTLog.h>
+#define FourCC2Str(code) (char[5]){(code >> 24) & 0xFF, (code >> 16) & 0xFF, (code >> 8) & 0xFF, code & 0xFF, 0}
 
 @interface VideoCaptureController ()
 
@@ -28,6 +29,8 @@
 
         // Default to the front camera.
         self.usingFrontCamera = YES;
+        
+        NSLog(@"Teste: %@", constraints);
 
         self.deviceId = constraints[@"deviceId"];
         self.width = [constraints[@"width"] intValue];
@@ -57,6 +60,26 @@
 
 - (void)dealloc {
     self.device = NULL;
+}
+
+- (NSArray<AVCaptureDeviceType> *) getAllDeviceTypes {
+    NSMutableArray<AVCaptureDeviceType> *deviceTypes = [[NSMutableArray alloc] init];
+    
+    [deviceTypes addObject:AVCaptureDeviceTypeBuiltInDualCamera];
+    [deviceTypes addObject:AVCaptureDeviceTypeBuiltInWideAngleCamera];
+    [deviceTypes addObject:AVCaptureDeviceTypeBuiltInTelephotoCamera];
+    [deviceTypes addObject:AVCaptureDeviceTypeBuiltInTrueDepthCamera];
+    
+    if(@available(iOS 13.0, *)){
+        [deviceTypes addObject:AVCaptureDeviceTypeBuiltInTripleCamera];
+        [deviceTypes addObject:AVCaptureDeviceTypeBuiltInDualWideCamera];
+        [deviceTypes addObject:AVCaptureDeviceTypeBuiltInUltraWideCamera];
+    }
+    if(@available(iOS 15.4, *)){
+        [deviceTypes addObject:AVCaptureDeviceTypeBuiltInLiDARDepthCamera];
+    }
+    
+    return deviceTypes;
 }
 
 - (void)startCapture {
@@ -201,21 +224,45 @@
 - (AVCaptureDeviceFormat *)selectFormatForDevice:(AVCaptureDevice *)device
                                  withTargetWidth:(int)targetWidth
                                 withTargetHeight:(int)targetHeight {
+    
     NSArray<AVCaptureDeviceFormat *> *formats = [RTCCameraVideoCapturer supportedFormatsForDevice:device];
     AVCaptureDeviceFormat *selectedFormat = nil;
     int currentDiff = INT_MAX;
+    
+    NSLog(@"user_width: %i", targetWidth);
+    NSLog(@"user_height: %i", targetHeight);
 
     for (AVCaptureDeviceFormat *format in formats) {
+        
         CMVideoDimensions dimension = CMVideoFormatDescriptionGetDimensions(format.formatDescription);
         FourCharCode pixelFormat = CMFormatDescriptionGetMediaSubType(format.formatDescription);
-        int diff = abs(targetWidth - dimension.width) + abs(targetHeight - dimension.height);
-        if (diff < currentDiff) {
+        NSString* codecString = [NSString stringWithCString:(const char *)FourCC2Str(pixelFormat) encoding:NSUTF8StringEncoding];
+        
+        bool iOS15Conditions = YES;
+        if(@available(iOS 15.0, *)){
+            iOS15Conditions = NO;
+            if(format.isHighPhotoQualitySupported) {
+                iOS15Conditions = YES;
+            }
+        }
+        
+        int diff = abs(targetWidth - dimension.width);
+        
+        if (
+            diff < currentDiff &&
+            dimension.width == targetWidth &&
+            dimension.height == targetHeight &&
+            iOS15Conditions &&
+            [codecString isEqualToString:@"420f"]
+            ) {
             selectedFormat = format;
             currentDiff = diff;
         } else if (diff == currentDiff && pixelFormat == [_capturer preferredOutputPixelFormat]) {
             selectedFormat = format;
         }
     }
+    
+    NSLog(@"selected format: %@", selectedFormat);
 
     return selectedFormat;
 }
